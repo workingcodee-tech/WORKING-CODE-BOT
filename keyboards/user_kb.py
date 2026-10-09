@@ -1,5 +1,7 @@
 """
-WORKING CODE — Oddiy foydalanuvchilar uchun barcha Reply va Inline klaviaturalar (O'zbek tilida).
+WORKING CODE — Oddiy foydalanuvchilar uchun klaviaturalar (O'zbek tilida).
+Oddiy foydalanuvchi obuna va telefon tasdig'idan o'tgach, pastda umuman tugma bo'lmaydi
+(ReplyKeyboardRemove), u darhol maxsus kodlarni yozib yuboraveradi.
 """
 
 from __future__ import annotations
@@ -18,11 +20,7 @@ from models import Channel
 
 
 def build_subscription_inline_kb(channels: Sequence[Channel]) -> InlineKeyboardMarkup:
-    """
-    Obuna bo'linmagan majburiy kanallar ro'yxatini Inline tugmalar ko'rinishida chiqaradi.
-    Foydalanuvchi kanalga kirib obuna bo'lishi bilan chat_member hodisasi orqali avtomatik ochiladi,
-    lekin Telegram kechikishlari uchun zaxira 'Obunani tekshirish' tugmasi ham qo'shiladi.
-    """
+    """Obuna bo'linmagan majburiy kanallar ro'yxatini Inline tugmalar ko'rinishida chiqaradi."""
     rows: list[list[InlineKeyboardButton]] = []
     for idx, ch in enumerate(channels, start=1):
         rows.append(
@@ -61,32 +59,21 @@ def build_phone_request_kb() -> ReplyKeyboardMarkup:
     )
 
 
-def build_verified_user_kb(is_temp_admin: bool = False) -> ReplyKeyboardMarkup:
+def build_verified_user_kb(is_temp_admin: bool = False) -> ReplyKeyboardMarkup | ReplyKeyboardRemove:
     """
-    Obuna va telefon tasdiqlangandan keyingi asosiy foydalanuvchi klaviaturasi.
-    Agar foydalanuvchi 30 daqiqalik vaqtinchalik admin bo'lsa, maxsus tugmalar qo'shiladi.
+    Oddiy foydalanuvchi obuna va telefonni tasdiqlagach, pastda umuman tugma bo'lmaydi
+    (ReplyKeyboardRemove qaytariladi) — foydalanuvchi to'g'ridan-to'g'ri kod yuboradi.
+    Faqat 30 daqiqalik vaqtinchalik admin bo'lsagina admin paneliga o'tish tugmasi chiqadi.
     """
-    rows: list[list[KeyboardButton]] = [
-        [
-            KeyboardButton(text="🔑 Kod yuborish bo‘yicha yo‘riqnoma"),
-            KeyboardButton(text="👤 Mening ma’lumotlarim"),
-        ],
-        [
-            KeyboardButton(text="🎂 Yoshni kiritish (ixtiyoriy)"),
-        ],
-    ]
     if is_temp_admin:
-        rows.insert(
-            0,
-            [
-                KeyboardButton(text="⏱ Vaqtinchalik Admin Paneli"),
+        return ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="⏱ Vaqtinchalik Admin Paneli")],
             ],
+            resize_keyboard=True,
+            input_field_placeholder="Maxsus kodni yozib yuboring...",
         )
-    return ReplyKeyboardMarkup(
-        keyboard=rows,
-        resize_keyboard=True,
-        input_field_placeholder="Maxsus kodni yozib yuboring (masalan: VIDEO2026)...",
-    )
+    return ReplyKeyboardRemove()
 
 
 def remove_kb() -> ReplyKeyboardRemove:

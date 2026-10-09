@@ -3,7 +3,8 @@ WORKING CODE — Asosiy foydalanuvchi oqimi:
 - /start buyrug'i
 - chat_member orqali kanalga kirish/chiqishni avtomatik kuzatish
 - Telefon raqamini request_contact=True orqali tasdiqlash
-- Maxsus kod orqali kontent (matn, media, albom) olish (protect_content=True bilan)
+- Obuna va telefon tasdiqlangan zahoti pastdagi tugmalarni olib tashlab (ReplyKeyboardRemove),
+  maxsus kodlar bilan bevosita ishlashga o'tish
 - 30 daqiqalik vaqtinchalik admin kodini faollashtirish
 """
 
@@ -33,12 +34,12 @@ from sqlalchemy.orm import selectinload
 
 from config import Config
 from database import DatabaseManager
-from handlers.states import UserStates
 from keyboards.admin_kb import build_main_admin_kb, build_temp_admin_kb
 from keyboards.user_kb import (
     build_phone_request_kb,
     build_subscription_inline_kb,
     build_verified_user_kb,
+    remove_kb,
 )
 from models import Channel, Content, ContentAccessLog, ContentItem, TemporaryAdmin, User
 from services.audit import log_admin_action
@@ -71,10 +72,8 @@ async def _send_content_to_user(
         )
         return
 
-    # Agar albom bo'lsa va ichida 2+ rasm/video/audio/hujjat bo'lsa
-    album_Grouping_types = {"photo", "video", "audio", "document"}
-    if len(items) > 1 and all(it.media_type in album_Grouping_types and it.file_id for it in items):
-        # Rasm va videolar bir media guruhda bo'la oladi; hujjatlar alohida, audiolar alohida
+    album_grouping_types = {"photo", "video", "audio", "document"}
+    if len(items) > 1 and all(it.media_type in album_grouping_types and it.file_id for it in items):
         media_group = []
         for idx, it in enumerate(items):
             cap = it.caption if idx == 0 else (it.caption or None)
@@ -97,7 +96,6 @@ async def _send_content_to_user(
         except TelegramAPIError as exc:
             logger.warning("Albom sifatida yuborishda xato, ketma-ket yuboriladi: %s", exc)
 
-    # Yakka elementlar yoki aralash kontent turlari ketma-ket protect_content=True bilan yuboriladi
     for it in items:
         mtype = it.media_type
         fid = it.file_id
@@ -138,6 +136,8 @@ async def cmd_start(
     3-bo'lim: /start buyrug'i.
     - Asosiy admin uchun obuna va telefon tasdig'isiz darhol admin klaviaturasi ochiladi.
     - Oddiy foydalanuvchini ismi bilan iliq kutib oladi, obuna va telefon tasdig'ini tekshiradi.
+    - Obuna va telefon tasdiqlangan bo'lsa, pastda hech qanday tugma chiqarmasdan (ReplyKeyboardRemove)
+      to'g'ridan-to'g'ri maxsus kodlarni qabul qilishni boshlaydi.
     """
     await state.clear()
     safe_name = html.escape(db_user.first_name or "Foydalanuvchi")
@@ -155,7 +155,8 @@ async def cmd_start(
         f"✨ <b>Assalomu alaykum, {safe_name}!</b>\n\n"
         f"<b>WORKING CODE</b> rasmiy botiga xush kelibsiz!\n"
         f"Bu yerda maxsus kodlar orqali eksklyuziv o‘quv materiallari, videolar, "
-        f"hujjatlar va fayllarni olishingiz mumkin."
+        f"hujjatlar va fayllarni olishingiz mumkin.",
+        reply_markup=remove_kb() if db_user.is_phone_verified else None,
     )
     await schedule_bot_message_deletion(
         session, welcome_msg, category="welcome", config=config
@@ -196,7 +197,7 @@ async def cmd_start(
         return
 
     await message.answer(
-        "✅ <b>Barcha shartlar bajarilgan!</b>\n\n"
+        "✅ <b>Bot faol holatda!</b>\n\n"
         "Kerakli fayl yoki materialni olish uchun uning <b>maxsus kodini</b> yozib yuboring "
         "(masalan: <code>VIDEO2026</code>):",
         reply_markup=build_verified_user_kb(is_temp_admin=temp_admin is not None),
@@ -253,8 +254,8 @@ async def cb_check_subscription(
         await callback.bot.send_message(
             chat_id=db_user.telegram_id,
             text=(
-                "🎉 <b>Obuna qayta tiklandi!</b>\n\n"
-                "Asosiy funksiyalar ochildi. Maxsus kodni yuborishingiz mumkin:"
+                "🎉 <b>Obuna tasdiqlandi!</b>\n\n"
+                "Bot faol. Kerakli kontentni olish uchun <b>maxsus kodni</b> yuborishingiz mumkin:"
             ),
             reply_markup=build_verified_user_kb(is_temp_admin=temp_admin is not None),
         )
@@ -271,16 +272,12 @@ async def on_channel_chat_member_update(
     4-bo'lim talabi:
     Telegram `chat_member` yangilanishlari orqali foydalanuvchi majburiy kanalga
     qo'shilganda yoki chiqib ketganda holatni darhol yangilaydi.
-    - Barcha kanallarga a'zo bo'lsa va telefoni tasdiqlangan bo'lsa, avtomatik ravishda
-      hech qanday tugmasiz asosiy funksiyalarni ochadi!
-    - Agar majburiy kanalni tark etsa, darhol bloklaydi va ogohlantirish yuboradi.
     """
     target_user = event.new_chat_member.user
     if not target_user or target_user.is_bot or target_user.id == config.admin_id:
         return
 
     async with db.session() as session:
-        # Shu chat bizning majburiy kanallarimizdan birimi?
         ch = await session.scalar(
             select(Channel).where(
                 Channel.channel_id == event.chat.id,
@@ -301,7 +298,6 @@ async def on_channel_chat_member_update(
             bot, session, target_user.id
         )
 
-        # 1-holat: Foydalanuvchi barcha kanallarga obuna bo'ldi
         if is_now_subscribed and not was_subscribed:
             if db_user.last_prompt_message_id:
                 await safe_delete_bot_message(
@@ -315,10 +311,9 @@ async def on_channel_chat_member_update(
                         chat_id=db_user.telegram_id,
                         text=(
                             "🎉 <b>Rahmat! Barcha kanallarga obuna bo‘lganingiz avtomatik tasdiqlandi.</b>\n\n"
-                            "Telefon raqamingiz ham tasdiqlangan. Endi maxsus kodni yuborib, "
-                            "kerakli fayllarni olishingiz mumkin!"
+                            "Endi maxsus kodni yuborib, kerakli fayllarni olishingiz mumkin:"
                         ),
-                        reply_markup=build_verified_user_kb(),
+                        reply_markup=remove_kb(),
                     )
                 except TelegramAPIError as exc:
                     logger.debug("Avtomatik ochish xabarini yuborib bo'lmadi: %s", exc)
@@ -339,7 +334,6 @@ async def on_channel_chat_member_update(
                 except TelegramAPIError as exc:
                     logger.debug("Telefon so'rovini yuborib bo'lmadi: %s", exc)
 
-        # 2-holat: Foydalanuvchi majburiy kanalni tark etdi
         elif not is_now_subscribed and was_subscribed:
             try:
                 if db_user.last_prompt_message_id:
@@ -374,9 +368,8 @@ async def handle_contact_verification(
 ) -> None:
     """
     5-bo'lim: Telefon raqamini tasdiqlash.
-    - Faqat foydalanuvchining o'z Telegram kontaktini qabul qiladi.
-    - Boshqa shaxsning kontaktini yuborishni rad etadi.
-    - Raqamni xalqaro formatda (+998...) saqlaydi.
+    Tasdiqlangan zahoti pastdagi tugma olib tashlanadi (ReplyKeyboardRemove) va
+    bot foydalanuvchi yuborgan maxsus kodlar bilan darhol ishlay boshlaydi.
     """
     contact = message.contact
     if contact is None or message.from_user is None:
@@ -412,9 +405,12 @@ async def handle_contact_verification(
         message.bot, session, db_user.telegram_id
     )
     if not is_sub_ok:
+        await message.answer(
+            "✅ <b>Telefon raqamingiz tasdiqlandi!</b>",
+            reply_markup=remove_kb(),
+        )
         sub_msg = await message.answer(
-            "✅ <b>Telefon raqamingiz tasdiqlandi!</b>\n\n"
-            "Endi quyidagi majburiy kanallarga obuna bo‘ling:",
+            "📢 <b>Endi quyidagi majburiy kanallarga obuna bo‘ling:</b>",
             reply_markup=build_subscription_inline_kb(unsubscribed),
         )
         db_user.last_prompt_message_id = sub_msg.message_id
@@ -424,80 +420,8 @@ async def handle_contact_verification(
         return
 
     await message.answer(
-        "🎉 <b>Tabriklaymiz! Telefon raqamingiz muvaffaqiyatli tasdiqlandi.</b>\n\n"
-        "Endi botning barcha asosiy funksiyalari siz uchun ochiq.\n"
-        "Kerakli fayl yoki videoni olish uchun <b>maxsus kodni</b> yuboring (masalan: <code>VIDEO2026</code>):",
-        reply_markup=build_verified_user_kb(is_temp_admin=temp_admin is not None),
-    )
-
-
-@router.message(F.text == "🔑 Kod yuborish bo‘yicha yo‘riqnoma")
-async def user_guide_handler(
-    message: Message,
-    session: AsyncSession,
-    config: Config,
-) -> None:
-    guide_msg = await message.answer(
-        "📖 <b>Maxsus kod orqali fayl olish yo‘riqnomasi:</b>\n\n"
-        "1️⃣ Administrator tomonidan berilgan maxsus kodni xabar sifatida yozib yuboring (masalan: <code>VIDEO2026</code>).\n"
-        "2️⃣ Kodni katta yoki kichik harflarda yozishingiz mumkin (<code>video2026</code> ham ishlaydi).\n"
-        "3️⃣ Bot kodni bazadan tekshiradi va unga biriktirilgan matn, rasm, video, hujjat yoki albomni darhol yuboradi.\n\n"
-        "🔒 <i>Eslatma: Yuborilgan barcha materiallar mualliflik huquqi bilan himoyalangan.</i>"
-    )
-    await schedule_bot_message_deletion(
-        session, guide_msg, category="guide", config=config
-    )
-
-
-@router.message(F.text == "👤 Mening ma’lumotlarim")
-async def user_profile_handler(
-    message: Message,
-    session: AsyncSession,
-    config: Config,
-    db_user: User,
-    temp_admin: TemporaryAdmin | None,
-) -> None:
-    age_str = f"{db_user.age} yosh" if db_user.age is not None else "Kiritilmagan"
-    role_str = "⏱ Vaqtinchalik Admin (30 daqiqalik)" if temp_admin else "👤 Tasdiqlangan foydalanuvchi"
-    info_msg = await message.answer(
-        f"👤 <b>Sizning profilingiz:</b>\n\n"
-        f"• <b>Ism:</b> {html.escape(db_user.first_name)}\n"
-        f"• <b>Telegram ID:</b> <code>{db_user.telegram_id}</code>\n"
-        f"• <b>Obuna holati:</b> {'✅ Tasdiqlangan' if db_user.is_subscribed_all else '❌ Tasdiqlanmagan'}\n"
-        f"• <b>Telefon tasdig‘i:</b> {'✅ Tasdiqlangan' if db_user.is_phone_verified else '❌ Tasdiqlanmagan'}\n"
-        f"• <b>Yosh:</b> {age_str}\n"
-        f"• <b>Maqom:</b> {role_str}"
-    )
-    await schedule_bot_message_deletion(
-        session, info_msg, category="profile_info", config=config
-    )
-
-
-@router.message(F.text == "🎂 Yoshni kiritish (ixtiyoriy)")
-async def ask_user_age(message: Message, state: FSMContext) -> None:
-    await state.set_state(UserStates.waiting_for_age)
-    await message.answer(
-        "🎂 <b>Yoshingizni raqamda kiriting (masalan: 22):</b>\n\n"
-        "<i>Bekor qilish uchun /start buyrug‘ini bosing.</i>"
-    )
-
-
-@router.message(UserStates.waiting_for_age)
-async def save_user_age(
-    message: Message,
-    state: FSMContext,
-    db_user: User,
-    temp_admin: TemporaryAdmin | None,
-) -> None:
-    raw = (message.text or "").strip()
-    if not raw.isdigit() or not (7 <= int(raw) <= 100):
-        await message.answer("❌ Iltimos, yoshingizni 7 dan 100 gacha bo‘lgan butun son ko‘rinishida kiriting:")
-        return
-
-    db_user.age = int(raw)
-    await state.clear()
-    await message.answer(
-        f"✅ Yoshingiz ({db_user.age} yosh) muvaffaqiyatli saqlandi!",
+        "🎉 <b>Tabriklaymiz! Telefon raqamingiz va obunangiz tasdiqlandi.</b>\n\n"
+        "Kerakli fayl yoki videoni olish uchun <b>maxsus kodni</b> yozib yuboring (masalan: <code>VIDEO2026</code>):",
         reply_markup=build_verified_user_kb(is_temp_admin=temp_admin is not None),
     )
 
@@ -511,7 +435,7 @@ async def open_temp_admin_panel(
     if temp_admin is None:
         await message.answer(
             "⌛️ Sizning 30 daqiqalik vaqtinchalik adminlik muddatingiz yakunlangan.",
-            reply_markup=build_verified_user_kb(is_temp_admin=False),
+            reply_markup=remove_kb(),
         )
         return
 
@@ -527,11 +451,10 @@ async def open_temp_admin_panel(
 @router.message(F.text == "👤 Oddiy rejimga qaytish")
 async def exit_temp_admin_panel(
     message: Message,
-    temp_admin: TemporaryAdmin | None,
 ) -> None:
     await message.answer(
-        "👤 Oddiy foydalanuvchi rejimiga qaytdingiz. Maxsus kodlarni yuborishingiz mumkin:",
-        reply_markup=build_verified_user_kb(is_temp_admin=temp_admin is not None),
+        "👤 Oddiy foydalanuvchi rejimiga qaytdingiz. Maxsus kodlarni yozib yuborishingiz mumkin:",
+        reply_markup=remove_kb(),
     )
 
 
@@ -557,7 +480,6 @@ async def handle_special_code_lookup(
     if not raw_text or raw_text.startswith("/"):
         return
 
-    # 1. Brute-force bloklanganlikni tekshirish
     if not is_main_admin:
         now_utc = datetime.now(db_user.last_active_at.tzinfo)
         if db_user.locked_until and db_user.locked_until > now_utc:
@@ -573,7 +495,6 @@ async def handle_special_code_lookup(
 
     code = normalize_code(raw_text)
 
-    # 2. Vaqtinchalik 30 daqiqalik admin kodini tekshirish
     if not is_main_admin and await verify_temp_admin_code(session, code, config):
         if temp_admin is not None:
             exp_str = temp_admin.expires_at.astimezone(config.tz).strftime("%H:%M:%S")
@@ -605,7 +526,6 @@ async def handle_special_code_lookup(
         )
         return
 
-    # 3. Bazadan maxsus kontent kodini qidirish (katta-kichik harflarga bog'liq emas)
     stmt = (
         select(Content)
         .options(selectinload(Content.items))
@@ -636,7 +556,6 @@ async def handle_special_code_lookup(
         )
         return
 
-    # 4. Kod topildi — urinishlar hisoblagichini tiklaymiz va kontentni yuboramiz
     await check_and_record_code_attempt(session, db_user, success=True, config=config)
 
     try:
@@ -648,7 +567,6 @@ async def handle_special_code_lookup(
         )
         return
 
-    # 5. Statistikani yangilash (usage_count va ContentAccessLog)
     content.usage_count = (content.usage_count or 0) + 1
     session.add(
         ContentAccessLog(

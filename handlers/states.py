@@ -7,10 +7,6 @@ from __future__ import annotations
 from aiogram.fsm.state import State, StatesGroup
 
 
-class UserStates(StatesGroup):
-    waiting_for_age = State()
-
-
 class AdminUserSearchStates(StatesGroup):
     waiting_for_user_id = State()
 
