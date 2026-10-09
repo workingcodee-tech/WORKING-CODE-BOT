@@ -1,0 +1,13 @@
+# Railway Nixpacks konfiguratsiyasi:
+# Loyihada ham AI Studio (Node.js) ham Telegram Bot (Python) fayllari bo'lgani uchun
+# Railway faqat Python 3.12 va requirements.txt ni o'rnatishini qat'iy belgilaymiz.
+providers = ["python"]
+
+[phases.setup]
+nixPkgs = ["python312", "postgresql"]
+
+[phases.install]
+cmds = ["pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt"]
+
+[start]
+cmd = "python main.py"

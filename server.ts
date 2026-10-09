@@ -32,8 +32,11 @@ const BOT_PROJECT_FILES = [
   { path: 'middlewares/auth_sub.py', category: 'Middleware (middlewares/)', description: 'Baza sessiyasi, foydalanuvchi yangilash, obuna va telefon nazorati' },
   { path: 'middlewares/throttling.py', category: 'Middleware (middlewares/)', description: 'Flood va spamga qarshi cheklov middleware' },
   { path: 'requirements.txt', category: 'Railway va Konfiguratsiya', description: 'Python 3.12+ kutubxonalari ro‘yxati (aiogram, SQLAlchemy, asyncpg)' },
+  { path: 'Dockerfile', category: 'Railway va Konfiguratsiya', description: 'Railway uchun toza Python 3.12-slim konteyner konfiguratsiyasi (npm xatolarini chetlab o‘tadi)' },
+  { path: 'nixpacks.toml', category: 'Railway va Konfiguratsiya', description: 'Railway Nixpacks uchun faqat Python provayderini majburlash fayli' },
   { path: 'Procfile', category: 'Railway va Konfiguratsiya', description: 'Railway worker jarayonini ishga tushirish konfiguratsiyasi' },
-  { path: 'railway.json', category: 'Railway va Konfiguratsiya', description: 'Railway Nixpacks va ALWAYS restart siyosati' },
+  { path: 'railway.json', category: 'Railway va Konfiguratsiya', description: 'Railway Dockerfile builder va ALWAYS restart siyosati' },
+  { path: '.npmrc', category: 'Railway va Konfiguratsiya', description: 'Node.js legacy-peer-deps sozlamasi (ERESOLVE xatosini oldini oladi)' },
   { path: '.env.example', category: 'Railway va Konfiguratsiya', description: 'Environment variables namunasi (BOT_TOKEN, ADMIN_ID, DATABASE_URL)' },
   { path: 'README.md', category: 'Railway va Konfiguratsiya', description: 'GitHub va Railway’ga joylash bo‘yicha to‘liq o‘zbekcha yo‘riqnoma' },
 ];
