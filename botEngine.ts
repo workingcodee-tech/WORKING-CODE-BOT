@@ -101,7 +101,6 @@ interface BotDatabaseState {
 
 type SessionStep =
   | { mode: 'idle' }
-  | { mode: 'waiting_for_age' }
   | { mode: 'waiting_for_user_id' }
   | { mode: 'waiting_for_new_channel' }
   | { mode: 'waiting_for_edit_channel'; channelDbId: number }
@@ -473,19 +472,14 @@ export class WorkingCodeTelegramBot {
   }
 
   private buildVerifiedUserKb(isTempAdmin: boolean) {
-    const keyboard: any[][] = [
-      [
-        { text: '🔑 Kod yuborish bo‘yicha yo‘riqnoma' },
-        { text: '👤 Mening ma’lumotlarim' },
-      ],
-      [{ text: '🎂 Yoshni kiritish (ixtiyoriy)' }],
-    ];
     if (isTempAdmin) {
-      keyboard.unshift([{ text: '⏱ Vaqtinchalik Admin Paneli' }]);
+      return {
+        keyboard: [[{ text: '⏱ Vaqtinchalik Admin Paneli' }]],
+        resize_keyboard: true,
+      };
     }
     return {
-      keyboard,
-      resize_keyboard: true,
+      remove_keyboard: true,
     };
   }
 
@@ -998,12 +992,16 @@ export class WorkingCodeTelegramBot {
 
       const { allSubscribed, unsubscribed } = await this.checkSubscriptions(dbUser.telegram_id);
       if (!allSubscribed) {
+        await this.callApi('sendMessage', {
+          chat_id: chatId,
+          parse_mode: 'HTML',
+          text: '✅ <b>Telefon raqamingiz tasdiqlandi!</b>',
+          reply_markup: { remove_keyboard: true },
+        });
         const subMsg = await this.callApi('sendMessage', {
           chat_id: chatId,
           parse_mode: 'HTML',
-          text:
-            `✅ <b>Telefon raqamingiz tasdiqlandi!</b>\n\n` +
-            `Endi quyidagi majburiy kanallarga obuna bo‘ling:`,
+          text: `📢 <b>Endi quyidagi majburiy kanallarga obuna bo‘ling:</b>`,
           reply_markup: this.buildSubscriptionInlineKb(unsubscribed),
         });
         dbUser.last_prompt_message_id = subMsg.message_id;
@@ -1016,9 +1014,8 @@ export class WorkingCodeTelegramBot {
         chat_id: chatId,
         parse_mode: 'HTML',
         text:
-          `🎉 <b>Tabriklaymiz! Telefon raqamingiz muvaffaqiyatli tasdiqlandi.</b>\n\n` +
-          `Endi botning barcha asosiy funksiyalari siz uchun ochiq.\n` +
-          `Kerakli fayl yoki videoni olish uchun <b>maxsus kodni</b> yuboring (masalan: <code>VIDEO2026</code>):`,
+          `🎉 <b>Tabriklaymiz! Telefon raqamingiz va obunangiz tasdiqlandi.</b>\n\n` +
+          `Kerakli fayl yoki videoni olish uchun <b>maxsus kodni</b> yozib yuboring (masalan: <code>VIDEO2026</code>):`,
         reply_markup: this.buildVerifiedUserKb(!!tempAdmin),
       });
       return;
@@ -1252,58 +1249,12 @@ export class WorkingCodeTelegramBot {
       return;
     }
 
-    // Regular User Menu Buttons
-    if (text === '🔑 Kod yuborish bo‘yicha yo‘riqnoma') {
-      const sent = await this.callApi('sendMessage', {
-        chat_id: chatId,
-        parse_mode: 'HTML',
-        text:
-          `📖 <b>Maxsus kod orqali fayl olish yo‘riqnomasi:</b>\n\n` +
-          `1️⃣ Administrator tomonidan berilgan maxsus kodni xabar sifatida yozib yuboring (masalan: <code>VIDEO2026</code>).\n` +
-          `2️⃣ Kodni katta yoki kichik harflarda yozishingiz mumkin.\n` +
-          `3️⃣ Bot kodni bazadan tekshiradi va unga biriktirilgan kontentni darhol yuboradi.`,
-      });
-      this.scheduleBotMsgDelete(chatId, sent.message_id);
-      return;
-    }
-
-    if (text === '👤 Mening ma’lumotlarim') {
-      const ageStr = dbUser.age !== null ? `${dbUser.age} yosh` : 'Kiritilmagan';
-      const roleStr = tempAdmin
-        ? '⏱ Vaqtinchalik Admin (30 daqiqalik)'
-        : '👤 Tasdiqlangan foydalanuvchi';
-      const sent = await this.callApi('sendMessage', {
-        chat_id: chatId,
-        parse_mode: 'HTML',
-        text:
-          `👤 <b>Sizning profilingiz:</b>\n\n` +
-          `• <b>Ism:</b> ${escapeHtml(dbUser.first_name)}\n` +
-          `• <b>Telegram ID:</b> <code>${dbUser.telegram_id}</code>\n` +
-          `• <b>Obuna holati:</b> ${dbUser.is_subscribed_all ? '✅ Tasdiqlangan' : '❌ Tasdiqlanmagan'}\n` +
-          `• <b>Telefon tasdig‘i:</b> ${dbUser.is_phone_verified ? '✅ Tasdiqlangan' : '❌ Tasdiqlanmagan'}\n` +
-          `• <b>Yosh:</b> ${ageStr}\n` +
-          `• <b>Maqom:</b> ${roleStr}`,
-      });
-      this.scheduleBotMsgDelete(chatId, sent.message_id);
-      return;
-    }
-
-    if (text === '🎂 Yoshni kiritish (ixtiyoriy)') {
-      this.userSessions.set(fromUser.id, { mode: 'waiting_for_age' });
-      await this.callApi('sendMessage', {
-        chat_id: chatId,
-        parse_mode: 'HTML',
-        text: '🎂 <b>Yoshingizni raqamda kiriting (masalan: 22):</b>\n\n<i>Bekor qilish uchun /start bosing.</i>',
-      });
-      return;
-    }
-
     if (text === '⏱ Vaqtinchalik Admin Paneli') {
       if (!tempAdmin) {
         await this.callApi('sendMessage', {
           chat_id: chatId,
           text: '⌛️ Sizning 30 daqiqalik vaqtinchalik adminlik muddatingiz yakunlangan.',
-          reply_markup: this.buildVerifiedUserKb(false),
+          reply_markup: { remove_keyboard: true },
         });
         return;
       }
@@ -1321,33 +1272,14 @@ export class WorkingCodeTelegramBot {
     if (text === '👤 Oddiy rejimga qaytish') {
       await this.callApi('sendMessage', {
         chat_id: chatId,
-        text: '👤 Oddiy foydalanuvchi rejimiga qaytdingiz. Maxsus kodlarni yuborishingiz mumkin:',
-        reply_markup: this.buildVerifiedUserKb(!!tempAdmin),
+        text: '👤 Oddiy foydalanuvchi rejimiga qaytdingiz. Maxsus kodlarni yozib yuborishingiz mumkin:',
+        reply_markup: { remove_keyboard: true },
       });
       return;
     }
 
     // 5. Handle Active Session Steps (FSM)
     const step = this.userSessions.get(fromUser.id) || { mode: 'idle' };
-
-    if (step.mode === 'waiting_for_age') {
-      if (!/^\d+$/.test(text) || Number(text) < 7 || Number(text) > 100) {
-        await this.callApi('sendMessage', {
-          chat_id: chatId,
-          text: '❌ Iltimos, yoshingizni 7 dan 100 gacha bo‘lgan butun son ko‘rinishida kiriting:',
-        });
-        return;
-      }
-      dbUser.age = Number(text);
-      this.saveState();
-      this.userSessions.set(fromUser.id, { mode: 'idle' });
-      await this.callApi('sendMessage', {
-        chat_id: chatId,
-        text: `✅ Yoshingiz (${dbUser.age} yosh) muvaffaqiyatli saqlandi!`,
-        reply_markup: this.buildVerifiedUserKb(!!tempAdmin),
-      });
-      return;
-    }
 
     if (step.mode === 'waiting_for_user_id' && isMainAdmin) {
       if (!/^\d+$/.test(text)) {

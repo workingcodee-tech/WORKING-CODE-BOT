@@ -1452,111 +1452,67 @@ export default function App() {
                 <div ref={chatEndRef} />
               </div>
 
-              {/* Persistent Telegram Reply Keyboard (Changes by Role) */}
-              <div className="px-4 py-2.5 bg-slate-900 border-t border-slate-800">
-                {simRole === 'main_admin' && (
-                  <div>
-                    <div className="text-[11px] font-mono text-slate-400 mb-1.5">
-                      Asosiy Admin Doimiy Klaviaturasi (8-bo‘lim talabi):
+              {/* Persistent Telegram Reply Keyboard (Only for Main Admin or Temp Admin; Regular User has NO bottom buttons) */}
+              {simRole !== 'user' && (
+                <div className="px-4 py-2.5 bg-slate-900 border-t border-slate-800">
+                  {simRole === 'main_admin' && (
+                    <div>
+                      <div className="text-[11px] font-mono text-slate-400 mb-1.5">
+                        Asosiy Admin Doimiy Klaviaturasi (8-bo‘lim talabi):
+                      </div>
+                      <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+                        {[
+                          '📊 Statistika',
+                          '👥 Foydalanuvchilar',
+                          '📢 Reklama',
+                          '📡 Kanallar',
+                          '📂 Xabarlar',
+                        ].map((btn) => (
+                          <button
+                            key={btn}
+                            type="button"
+                            onClick={() => handleAdminButton(btn)}
+                            className="py-2 px-2.5 text-xs font-medium bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded-lg transition-colors whitespace-nowrap truncate"
+                          >
+                            {btn}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
-                      {[
-                        '📊 Statistika',
-                        '👥 Foydalanuvchilar',
-                        '📢 Reklama',
-                        '📡 Kanallar',
-                        '📂 Xabarlar',
-                      ].map((btn) => (
+                  )}
+
+                  {simRole === 'temp_admin' && (
+                    <div>
+                      <div className="text-[11px] font-mono text-amber-400 mb-1.5">
+                        30 Daqiqalik Vaqtinchalik Admin Klaviaturasi (Cheklangan huquqlar):
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
                         <button
-                          key={btn}
                           type="button"
-                          onClick={() => handleAdminButton(btn)}
-                          className="py-2 px-2.5 text-xs font-medium bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded-lg transition-colors whitespace-nowrap truncate"
+                          onClick={() => handleAdminButton('📊 Statistika')}
+                          className="py-2 px-3 text-xs font-medium bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded-lg transition-colors whitespace-nowrap truncate"
                         >
-                          {btn}
+                          📊 Statistika
                         </button>
-                      ))}
+                        <button
+                          type="button"
+                          onClick={() => handleAdminButton('📂 Xabarlar')}
+                          className="py-2 px-3 text-xs font-medium bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded-lg transition-colors whitespace-nowrap truncate"
+                        >
+                          📂 Xabarlar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAdminButton('👥 Foydalanuvchilar')}
+                          className="py-2 px-3 text-xs font-medium bg-slate-950 hover:bg-slate-800 text-rose-300 border border-slate-800 rounded-lg transition-colors whitespace-nowrap truncate"
+                        >
+                          👥 Foydalanuvchilar (Ruxsatni sinash)
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                )}
-
-                {simRole === 'temp_admin' && (
-                  <div>
-                    <div className="text-[11px] font-mono text-amber-400 mb-1.5">
-                      30 Daqiqalik Vaqtinchalik Admin Klaviaturasi (Cheklangan huquqlar):
-                    </div>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => handleAdminButton('📊 Statistika')}
-                        className="py-2 px-3 text-xs font-medium bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded-lg transition-colors whitespace-nowrap truncate"
-                      >
-                        📊 Statistika
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleAdminButton('📂 Xabarlar')}
-                        className="py-2 px-3 text-xs font-medium bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded-lg transition-colors whitespace-nowrap truncate"
-                      >
-                        📂 Xabarlar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleAdminButton('👥 Foydalanuvchilar')}
-                        className="py-2 px-3 text-xs font-medium bg-slate-950 hover:bg-slate-800 text-rose-300 border border-slate-800 rounded-lg transition-colors whitespace-nowrap truncate"
-                      >
-                        👥 Foydalanuvchilar (Ruxsatni sinash)
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {simRole === 'user' && (
-                  <div className="grid grid-cols-3 gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        appendUserMessage('🔑 Kod yuborish bo‘yicha yo‘riqnoma');
-                        appendBotMessage({
-                          text: '📖 Maxsus kodni xabar sifatida yozib yuboring (masalan: VIDEO2026). Barcha materiallar protect_content=True bilan himoyalangan.',
-                          isTempAutoDelete: true,
-                          deleteCountdown: autoDeleteSeconds,
-                        });
-                      }}
-                      className="py-1.5 px-2.5 text-xs font-medium bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg transition-colors whitespace-nowrap truncate"
-                    >
-                      🔑 Yo‘riqnoma
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        appendUserMessage('👤 Mening ma’lumotlarim');
-                        appendBotMessage({
-                          text: `👤 Sizning profilingiz:\n• Ism: ${activeSimUser.firstName}\n• ID: ${activeSimUser.telegramId}\n• Obuna: ${allChannelsSubscribed ? '✅' : '❌'}\n• Telefon: ${activeSimUser.isPhoneVerified ? activeSimUser.phoneNumber : '❌'}\n• Yosh: ${activeSimUser.age ?? 'Kiritilmagan'}`,
-                          isTempAutoDelete: true,
-                          deleteCountdown: autoDeleteSeconds,
-                        });
-                      }}
-                      className="py-1.5 px-2.5 text-xs font-medium bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg transition-colors whitespace-nowrap truncate"
-                    >
-                      👤 Ma’lumotlarim
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAdminFlowMode('entering_age');
-                        appendUserMessage('🎂 Yoshni kiritish (ixtiyoriy)');
-                        appendBotMessage({
-                          text: '🎂 Yoshingizni raqamda kiriting (masalan: 22):',
-                        });
-                      }}
-                      className="py-1.5 px-2.5 text-xs font-medium bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg transition-colors whitespace-nowrap truncate"
-                    >
-                      🎂 Yoshni kiritish
-                    </button>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              )}
 
               {/* Message Input Form */}
               <form
