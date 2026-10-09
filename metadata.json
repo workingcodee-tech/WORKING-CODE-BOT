@@ -1,0 +1,6 @@
+{
+  "name": "WORKING CODE — Telegram Bot & Boshqaruv Arxitekturasi",
+  "description": "Python 3.12, aiogram 3.x va PostgreSQL asosida yaratilgan WORKING CODE Telegram botining to‘liq kodi, interaktiv simulyatori va Railway serveriga joylash tizimi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
