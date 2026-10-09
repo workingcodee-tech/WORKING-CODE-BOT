@@ -6,13 +6,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Kerakli tizim paketlari
+# Tizim paketlari va avtomatik SQLite / PostgreSQL uchun papka yaratish
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /app/data
 
-# Python kutubxonalarini o'rnatish
+# Python kutubxonalarini o'rnatish (aiogram, SQLAlchemy, asyncpg, aiosqlite)
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 

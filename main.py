@@ -1,33 +1,36 @@
 """
 WORKING CODE — Telegram Botning asosiy kirish nuqtasi (main.py).
-Python 3.12+ | aiogram 3.x | SQLAlchemy 2.x | asyncpg | Railway 24/7
+Python 3.12+ | aiogram 3.x | SQLAlchemy 2.x | asyncpg / aiosqlite | Railway 24/7
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 
-from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramAPIError
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import ErrorEvent
+try:
+    from aiogram import Bot, Dispatcher
+    from aiogram.client.default import DefaultBotProperties
+    from aiogram.enums import ParseMode
+    from aiogram.exceptions import TelegramAPIError
+    from aiogram.fsm.storage.memory import MemoryStorage
+    from aiogram.types import ErrorEvent
+except ModuleNotFoundError:
+    # Agar Node.js konteynerida (pip va aiogram o'rnatilmagan muhitda) chaqirilsa,
+    # xatolik bermasdan Node.js botEngine (tsx server.ts) ga yo'naltiradi.
+    print(
+        "[WORKING CODE] Python muhitida aiogram topilmadi. "
+        "Bot Node.js / TypeScript dvigateli (botEngine.ts) orqali ishga tushirilmoqda..."
+    )
+    os.execvp("npx", ["npx", "tsx", "server.ts"])
 
-from config import Config, load_config
-from database import DatabaseManager
-from handlers import register_all_routers
-from middlewares.auth_sub import DatabaseAndAccessMiddleware
-from middlewares.throttling import ThrottlingMiddleware
-from services.broadcast import broadcast_queue_worker
-from services.cleanup import cleanup_expired_messages_worker
-from services.security import SensitiveTokenFilter
 
+def setup_logging(log_level: str, bot_token: str) -> None:
+    from services.security import SensitiveTokenFilter
 
-def setup_logging(config: Config) -> None:
-    level = getattr(logging, config.log_level.upper(), logging.INFO)
+    level = getattr(logging, log_level.upper(), logging.INFO)
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
@@ -38,7 +41,7 @@ def setup_logging(config: Config) -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     handler.setFormatter(formatter)
-    handler.addFilter(SensitiveTokenFilter(config.bot_token))
+    handler.addFilter(SensitiveTokenFilter(bot_token))
 
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
@@ -68,8 +71,16 @@ async def register_global_error_handler(dp: Dispatcher) -> None:
 
 
 async def main() -> None:
+    from config import load_config
+    from database import DatabaseManager
+    from handlers import register_all_routers
+    from middlewares.auth_sub import DatabaseAndAccessMiddleware
+    from middlewares.throttling import ThrottlingMiddleware
+    from services.broadcast import broadcast_queue_worker
+    from services.cleanup import cleanup_expired_messages_worker
+
     config = load_config()
-    setup_logging(config)
+    setup_logging(config.log_level, config.bot_token)
     logger = logging.getLogger("WorkingCodeBot")
 
     logger.info("WORKING CODE Telegram boti ishga tushirilmoqda...")
@@ -87,7 +98,6 @@ async def main() -> None:
 
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Chat_member hodisalarida ham bot va db mavjud bo'lishi uchun workflow_data ga qo'shamiz
     dp.workflow_data.update(
         {
             "db": db,
@@ -95,12 +105,10 @@ async def main() -> None:
         }
     )
 
-    # Middleware'larni ulash
     dp.message.middleware(ThrottlingMiddleware(min_interval_seconds=0.35))
     dp.message.middleware(DatabaseAndAccessMiddleware(db=db, config=config))
     dp.callback_query.middleware(DatabaseAndAccessMiddleware(db=db, config=config))
 
-    # Barcha routerlarni va xatolik ushlagichni ro'yxatdan o'tkazish
     await register_global_error_handler(dp)
     register_all_routers(dp)
 

@@ -1,17 +1,19 @@
+import 'dotenv/config';
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
+import { startNativeTelegramBotIfConfigured } from './botEngine.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const BOT_PROJECT_FILES = [
   { path: 'main.py', category: 'Asosiy modullar', description: 'Kirish nuqtasi, Polling, Background Workers va xavfsiz yopilish' },
-  { path: 'config.py', category: 'Asosiy modullar', description: 'Environment variables va Railway DATABASE_URL (asyncpg) konfiguratsiyasi' },
-  { path: 'database.py', category: 'Asosiy modullar', description: 'SQLAlchemy 2.x AsyncEngine, qayta ulanish va avtomatik jadval yaratish' },
-  { path: 'models.py', category: 'Asosiy modullar', description: '11 ta PostgreSQL jadvallari va bog‘lanishlar (Users, Channels, Contents va b.)' },
+  { path: 'config.py', category: 'Asosiy modullar', description: 'Faqat BOT_TOKEN va ADMIN_ID bilan ham ishlovchi avtomatik konfiguratsiya' },
+  { path: 'database.py', category: 'Asosiy modullar', description: 'SQLAlchemy 2.x (PostgreSQL + avtomatik SQLite zaxira ulanishi)' },
+  { path: 'models.py', category: 'Asosiy modullar', description: '11 ta jadvallar va bog‘lanishlar (Users, Channels, Contents va b.)' },
   { path: 'handlers/__init__.py', category: 'Handlerlar (handlers/)', description: 'Barcha routerlarni ustuvorlik tartibida ro‘yxatdan o‘tkazish' },
   { path: 'handlers/states.py', category: 'Handlerlar (handlers/)', description: 'FSM (Finite State Machine) holatlari' },
   { path: 'handlers/user.py', category: 'Handlerlar (handlers/)', description: '/start, chat_member avto-ochish, telefon tasdiqlash va maxsus kod qidirish' },
@@ -31,19 +33,20 @@ const BOT_PROJECT_FILES = [
   { path: 'middlewares/__init__.py', category: 'Middleware (middlewares/)', description: 'Middleware paketi initsializatori' },
   { path: 'middlewares/auth_sub.py', category: 'Middleware (middlewares/)', description: 'Baza sessiyasi, foydalanuvchi yangilash, obuna va telefon nazorati' },
   { path: 'middlewares/throttling.py', category: 'Middleware (middlewares/)', description: 'Flood va spamga qarshi cheklov middleware' },
-  { path: 'requirements.txt', category: 'Railway va Konfiguratsiya', description: 'Python 3.12+ kutubxonalari ro‘yxati (aiogram, SQLAlchemy, asyncpg)' },
-  { path: 'Dockerfile', category: 'Railway va Konfiguratsiya', description: 'Railway uchun toza Python 3.12-slim konteyner konfiguratsiyasi (npm xatolarini chetlab o‘tadi)' },
+  { path: 'botEngine.ts', category: 'Railway va Konfiguratsiya', description: 'Node.js / TypeScript ichida to‘g‘ridan-to‘g‘ri ishlovchi Telegram Bot dvigateli' },
+  { path: 'requirements.txt', category: 'Railway va Konfiguratsiya', description: 'Python 3.12+ kutubxonalari ro‘yxati (aiogram, SQLAlchemy, asyncpg, aiosqlite)' },
+  { path: 'Dockerfile', category: 'Railway va Konfiguratsiya', description: 'Railway uchun toza Python 3.12-slim konteyner konfiguratsiyasi' },
   { path: 'nixpacks.toml', category: 'Railway va Konfiguratsiya', description: 'Railway Nixpacks uchun faqat Python provayderini majburlash fayli' },
   { path: 'Procfile', category: 'Railway va Konfiguratsiya', description: 'Railway worker jarayonini ishga tushirish konfiguratsiyasi' },
   { path: 'railway.json', category: 'Railway va Konfiguratsiya', description: 'Railway Dockerfile builder va ALWAYS restart siyosati' },
   { path: '.npmrc', category: 'Railway va Konfiguratsiya', description: 'Node.js legacy-peer-deps sozlamasi (ERESOLVE xatosini oldini oladi)' },
-  { path: '.env.example', category: 'Railway va Konfiguratsiya', description: 'Environment variables namunasi (BOT_TOKEN, ADMIN_ID, DATABASE_URL)' },
+  { path: '.env.example', category: 'Railway va Konfiguratsiya', description: 'Environment variables namunasi (BOT_TOKEN, ADMIN_ID)' },
   { path: 'README.md', category: 'Railway va Konfiguratsiya', description: 'GitHub va Railway’ga joylash bo‘yicha to‘liq o‘zbekcha yo‘riqnoma' },
 ];
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json());
 
@@ -128,6 +131,7 @@ if __name__ == "__main__":
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`WORKING CODE Studio running on http://0.0.0.0:${PORT}`);
+    startNativeTelegramBotIfConfigured();
   });
 }
 

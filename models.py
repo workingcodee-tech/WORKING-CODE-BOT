@@ -1,6 +1,6 @@
 """
-WORKING CODE — PostgreSQL ma'lumotlar bazasi modellari (SQLAlchemy 2.x).
-Talab etilgan barcha 10 ta asosiy jadval + vaqtinchalik xabarlarni o'chirish jadvali.
+WORKING CODE — Ma'lumotlar bazasi modellari (SQLAlchemy 2.x).
+PostgreSQL (asyncpg) va SQLite (aiosqlite) bilan 100% mos ishlaydi.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    TypeDecorator,
     UniqueConstraint,
     func,
 )
@@ -25,6 +26,33 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class TZDateTime(TypeDecorator):
+    """
+    Har qanday ma'lumotlar bazasida (PostgreSQL hamda SQLite) datetime qiymatlarining
+    har doim timezone-aware (UTC) bo'lishini kafolatlaydi.
+    """
+
+    impl = DateTime
+    cache_ok = True
+
+    def __init__(self, timezone: bool = True) -> None:
+        super().__init__(timezone=timezone)
+
+    def process_bind_param(self, value: Optional[datetime], dialect) -> Optional[datetime]:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    def process_result_value(self, value: Optional[datetime], dialect) -> Optional[datetime]:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
 
 class Base(DeclarativeBase):
@@ -44,22 +72,18 @@ class User(Base):
     phone_number: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     is_phone_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     is_subscribed_all: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
-    # Yosh faqat foydalanuvchi alohida taqdim etgan bo'lsagina yoziladi, hech qachon taxmin qilinmaydi
     age: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     is_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
 
-    # Brute-force himoyasi uchun ustunlar
     failed_code_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-
-    # Foydalanuvchiga yuborilgan oxirgi obuna ogohlantirish xabari ID'si (faqat bot xabarini o'chirish uchun)
+    locked_until: Mapped[Optional[datetime]] = mapped_column(TZDateTime(timezone=True), nullable=True)
     last_prompt_message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
 
     joined_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now(), index=True
+        TZDateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now(), index=True
     )
     last_active_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        TZDateTime(timezone=True),
         nullable=False,
         default=utcnow,
         onupdate=utcnow,
@@ -88,10 +112,10 @@ class Channel(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     added_by: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now()
+        TZDateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow, server_default=func.now()
+        TZDateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow, server_default=func.now()
     )
 
 
@@ -101,17 +125,16 @@ class Content(Base):
     __tablename__ = "contents"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    # Kod har doim katta harflarda (UPPERCASE) saqlanadi, qidiruvda case-insensitive ishlaydi
     code: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     content_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     is_album: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     usage_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_by: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now(), index=True
+        TZDateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now(), index=True
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow, server_default=func.now()
+        TZDateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow, server_default=func.now()
     )
 
     items: Mapped[List["ContentItem"]] = relationship(
@@ -126,7 +149,7 @@ class Content(Base):
 
 
 class ContentItem(Base):
-    """4. ContentItems — Kontent tarkibidagi alohida fayl yoki matn elementlari (albom va multi-item uchun)."""
+    """4. ContentItems — Kontent tarkibidagi alohida fayl yoki matn elementlari."""
 
     __tablename__ = "content_items"
 
@@ -135,14 +158,12 @@ class ContentItem(Base):
         Integer, ForeignKey("contents.id", ondelete="CASCADE"), nullable=False, index=True
     )
     item_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    media_type: Mapped[str] = mapped_column(
-        String(50), nullable=False
-    )  # text, photo, video, audio, voice, animation, document, sticker
+    media_type: Mapped[str] = mapped_column(String(50), nullable=False)
     file_id: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     text_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     caption: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now()
+        TZDateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now()
     )
 
     content: Mapped["Content"] = relationship("Content", back_populates="items")
@@ -165,7 +186,7 @@ class ContentAccessLog(Base):
     )
     code_used: Mapped[str] = mapped_column(String(100), nullable=False)
     accessed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now(), index=True
+        TZDateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now(), index=True
     )
 
     user: Mapped["User"] = relationship("User", back_populates="access_logs")
@@ -183,17 +204,17 @@ class TemporaryAdmin(Base):
     )
     telegram_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     granted_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now()
+        TZDateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now()
     )
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(TZDateTime(timezone=True), nullable=False, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
-    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(timezone=True), nullable=True)
 
     user: Mapped["User"] = relationship("User", back_populates="temp_admin_records")
 
 
 class BotSetting(Base):
-    """7. BotSettings — Botning dinamik sozlamalari (vaqtinchalik admin maxfiy kodi, o'chirish vaqti va h.k.)."""
+    """7. BotSettings — Botning dinamik sozlamalari."""
 
     __tablename__ = "bot_settings"
 
@@ -202,7 +223,7 @@ class BotSetting(Base):
     value: Mapped[str] = mapped_column(Text, nullable=False)
     updated_by: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow, server_default=func.now()
+        TZDateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow, server_default=func.now()
     )
 
 
@@ -218,18 +239,16 @@ class Broadcast(Base):
     message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     file_id: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     caption_or_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="pending", index=True
-    )  # pending, running, completed, cancelled
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
     total_users: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     sent_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     blocked_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now()
+        TZDateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now()
     )
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(timezone=True), nullable=True)
 
     recipients: Mapped[List["BroadcastRecipient"]] = relationship(
         "BroadcastRecipient", back_populates="broadcast", cascade="all, delete-orphan"
@@ -237,7 +256,7 @@ class Broadcast(Base):
 
 
 class BroadcastRecipient(Base):
-    """9. BroadcastRecipients — Reklama yuboriladigan har bir foydalanuvchi holati (qayta ishga tushganda davom etish uchun)."""
+    """9. BroadcastRecipients — Reklama yuboriladigan har bir foydalanuvchi holati."""
 
     __tablename__ = "broadcast_recipients"
 
@@ -249,11 +268,9 @@ class BroadcastRecipient(Base):
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     telegram_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="pending", index=True
-    )  # pending, sent, blocked, failed
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
     error_message: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    processed_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(timezone=True), nullable=True)
 
     broadcast: Mapped["Broadcast"] = relationship("Broadcast", back_populates="recipients")
 
@@ -270,13 +287,13 @@ class AuditLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     actor_telegram_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    actor_role: Mapped[str] = mapped_column(String(32), nullable=False)  # main_admin, temp_admin, system
+    actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
     action: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     target_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     target_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now(), index=True
+        TZDateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now(), index=True
     )
 
 
@@ -289,8 +306,8 @@ class ScheduledMessageDeletion(Base):
     chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     category: Mapped[str] = mapped_column(String(64), nullable=False, default="temp")
-    delete_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    delete_after: Mapped[datetime] = mapped_column(TZDateTime(timezone=True), nullable=False, index=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now()
+        TZDateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now()
     )
