@@ -54,7 +54,6 @@ interface SimUserRecord {
   phoneNumber: string | null;
   isPhoneVerified: boolean;
   isSubscribedAll: boolean;
-  age: number | null;
   joinedAt: string;
   lastActiveAt: string;
   isTempAdmin: boolean;
@@ -144,7 +143,6 @@ const INITIAL_USERS: SimUserRecord[] = [
     phoneNumber: null,
     isPhoneVerified: false,
     isSubscribedAll: false,
-    age: null,
     joinedAt: '09.10.2026 08:00:12',
     lastActiveAt: '09.10.2026 08:18:00',
     isTempAdmin: false,
@@ -159,7 +157,6 @@ const INITIAL_USERS: SimUserRecord[] = [
     phoneNumber: '+998901234567',
     isPhoneVerified: true,
     isSubscribedAll: true,
-    age: 23,
     joinedAt: '09.10.2026 07:30:45',
     lastActiveAt: '09.10.2026 08:15:22',
     isTempAdmin: false,
@@ -174,7 +171,6 @@ const INITIAL_USERS: SimUserRecord[] = [
     phoneNumber: '+998939876543',
     isPhoneVerified: true,
     isSubscribedAll: true,
-    age: null,
     joinedAt: '08.10.2026 19:42:10',
     lastActiveAt: '09.10.2026 08:12:05',
     isTempAdmin: false,
@@ -186,8 +182,8 @@ const DB_TABLES_SPEC = [
   {
     name: 'users',
     model: 'User',
-    purpose: 'Bot foydalanuvchilari, xalqaro telefon raqami, obuna holati, ixtiyoriy yosh va brute-force himoyasi.',
-    columns: 'id (PK), telegram_id (BIGINT UNIQUE), first_name, last_name, username, phone_number, is_phone_verified, is_subscribed_all, age (NULLABLE), is_blocked, failed_code_attempts, locked_until, joined_at, last_active_at',
+    purpose: 'Bot foydalanuvchilari, xalqaro telefon raqami, obuna holati va brute-force himoyasi.',
+    columns: 'id (PK), telegram_id (BIGINT UNIQUE), first_name, last_name, username, phone_number, is_phone_verified, is_subscribed_all, is_blocked, failed_code_attempts, locked_until, joined_at, last_active_at',
   },
   {
     name: 'channels',
@@ -287,7 +283,6 @@ export default function App() {
     | 'searching_content_code'
     | 'broadcast_input'
     | 'setting_temp_code'
-    | 'entering_age'
   >(null);
   const [pendingContentDesc, setPendingContentDesc] = useState<string>('');
   const [pendingBroadcastText, setPendingBroadcastText] = useState<string>('');
@@ -468,6 +463,29 @@ export default function App() {
       return;
     }
 
+    // Foydalanuvchi har doim /start bosganda Asosiy Adminga xabar yuboriladi
+    const nowFull = new Date().toLocaleString('uz-UZ');
+    appendBotMessage({
+      text:
+        `🔔 [Asosiy Adminga Xabar -> ADMIN_ID=900100200]\n` +
+        `Foydalanuvchi botga /start bosdi!\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `🆔 Telegram ID: ${activeSimUser.telegramId}\n` +
+        `🙍‍♂️ Ism-familiya: ${activeSimUser.firstName} ${activeSimUser.lastName}\n` +
+        `🔗 Username: @${activeSimUser.username}\n` +
+        `📞 Telefon: ${activeSimUser.phoneNumber || 'Tasdiqlanmagan'}\n` +
+        `📡 Kanal obunasi: ${allChannelsSubscribed ? '✅ Obuna bo‘lgan' : '❌ Obuna bo‘lmagan'}\n` +
+        `🛡 Maqomi: ${simRole === 'temp_admin' ? '⏱ Vaqtinchalik Admin' : '👤 Oddiy foydalanuvchi'}\n` +
+        `🕒 Vaqt: ${nowFull}`,
+      inlineButtons:
+        simRole === 'temp_admin'
+          ? [
+              { label: '✅ Qoldirish', action: 'temp_alert_keep' },
+              { label: '🚫 Bekor qilish', action: 'temp_alert_revoke' },
+            ]
+          : undefined,
+    });
+
     if (!allChannelsSubscribed) {
       const unsub = channels
         .filter((c) => !c.userSubscribed)
@@ -491,7 +509,7 @@ export default function App() {
     }
 
     appendBotMessage({
-      text: `✅ Assalomu alaykum, ${activeSimUser.firstName}! Barcha shartlar bajarilgan.\n\nKerakli fayl yoki materialni olish uchun maxsus kodni yozib yuboring (masalan: VIDEO2026):`,
+      text: `✅ Assalomu alaykum, ${activeSimUser.firstName}! Bot faol holatda (pastda hech qanday ortiqcha tugma yo‘q).\n\nKerakli fayl yoki materialni olish uchun maxsus kodni yozib yuboring (masalan: VIDEO2026):`,
     });
   };
 
@@ -632,7 +650,6 @@ export default function App() {
         `🙍‍♂️ Familiya: ${u.lastName || '—'}\n` +
         `🔗 Username: @${u.username}\n` +
         `📞 Telefon raqami: ${u.phoneNumber || 'Tasdiqlanmagan'}\n` +
-        `🎂 Yosh: ${u.age !== null ? `${u.age} yosh` : 'Taqdim etilmagan (avtomatik taxmin qilinmaydi)'}\n` +
         `📅 Birinchi kirgan vaqti: ${u.joinedAt}\n` +
         `🕒 Oxirgi faolligi: ${u.lastActiveAt}\n` +
         `📡 Kanal obunasi holati: ${u.isSubscribedAll ? '✅ Obuna bo‘lgan' : '❌ Obuna bo‘lmagan'}\n` +
@@ -649,6 +666,51 @@ export default function App() {
   };
 
   const handleInlineAction = (action: string) => {
+    if (action === 'temp_alert_keep') {
+      setAuditLogs((prev) => [
+        {
+          id: prev.length + 1,
+          timestamp: new Date().toLocaleString('uz-UZ'),
+          actorId: 900100200,
+          actorRole: 'main_admin',
+          action: 'KEEP_TEMP_ADMIN',
+          details: `Vaqtinchalik admin (${activeSimUser.telegramId}) huquqi Asosiy Admin tomonidan qoldirildi`,
+        },
+        ...prev,
+      ]);
+      appendBotMessage({
+        text: `✅ Qaror qabul qilindi: Foydalanuvchi ${activeSimUser.firstName} (${activeSimUser.telegramId}) ning 30 daqiqalik vaqtinchalik admin huquqi o‘z kuchida QOLDIRILDI.`,
+        inlineButtons: [{ label: '🚫 Bekor qilish', action: 'temp_alert_revoke' }],
+      });
+      return;
+    }
+
+    if (action === 'temp_alert_revoke') {
+      setSimRole('user');
+      setUsers((prev) =>
+        prev.map((u, idx) =>
+          idx === 0 ? { ...u, isTempAdmin: false, tempAdminExpiresAt: null } : u
+        )
+      );
+      setAuditLogs((prev) => [
+        {
+          id: prev.length + 1,
+          timestamp: new Date().toLocaleString('uz-UZ'),
+          actorId: 900100200,
+          actorRole: 'main_admin',
+          action: 'REVOKE_TEMP_ADMIN',
+          details: `Vaqtinchalik admin (${activeSimUser.telegramId}) huquqi Asosiy Admin tomonidan darhol bekor qilindi`,
+        },
+        ...prev,
+      ]);
+      appendBotMessage({
+        text:
+          `🚫 Qaror qabul qilindi: Vaqtinchalik admin (${activeSimUser.telegramId}) huquqi Asosiy Admin tomonidan darhol BEKOR QILINDI!\n\n` +
+          `👤 Foydalanuvchiga xabar yuborildi va pastdagi admin tugmalari olib tashlanib (ReplyKeyboardRemove), oddiy foydalanuvchi rejimiga qaytarildi.`,
+      });
+      return;
+    }
+
     if (action.startsWith('user_page:')) {
       const idx = parseInt(action.split(':')[1], 10);
       showUserCardInChat(idx);
@@ -754,23 +816,6 @@ export default function App() {
 
     if (raw === '/start') {
       handleTriggerStart();
-      return;
-    }
-
-    // Handle active FSM flows first
-    if (adminFlowMode === 'entering_age') {
-      const ageNum = parseInt(raw, 10);
-      if (isNaN(ageNum) || ageNum < 7 || ageNum > 100) {
-        appendBotMessage({
-          text: '❌ Iltimos, yoshingizni 7 dan 100 gacha bo‘lgan son ko‘rinishida kiriting:',
-        });
-        return;
-      }
-      setUsers((prev) => prev.map((u, i) => (i === 0 ? { ...u, age: ageNum } : u)));
-      setAdminFlowMode(null);
-      appendBotMessage({
-        text: `✅ Yoshingiz (${ageNum} yosh) muvaffaqiyatli saqlandi!`,
-      });
       return;
     }
 
@@ -907,7 +952,7 @@ export default function App() {
       }
       if (!activeSimUser.isPhoneVerified) {
         appendBotMessage({
-          text: `📱 Telefon raqamni tasdiqlash talab etiladi!\nTelefon raqami tasdiqlanmaguncha kodlar bo‘yicha kontent olishga ruxsat berilmaydi. Chap paneldagi «Telefon raqamni tasdiqlash» tugmasini bosing.`,
+          text: `📱 Telefon raqamni tasdiqlash talab etiladi!\nTelefon raqami tasdiqlanmaguncha kodlar bo‘yicha kontent olishga ruxsat berilmaydi. Chap paneldagi «O‘z kontaktini yuborish» tugmasini bosing.`,
           isTempAutoDelete: true,
           deleteCountdown: autoDeleteSeconds,
         });
@@ -923,6 +968,7 @@ export default function App() {
         hour: '2-digit',
         minute: '2-digit',
       });
+      const nowFull = new Date().toLocaleString('uz-UZ');
       setSimRole('temp_admin');
       setUsers((prev) =>
         prev.map((u, idx) =>
@@ -932,7 +978,7 @@ export default function App() {
       setAuditLogs((prev) => [
         {
           id: prev.length + 1,
-          timestamp: new Date().toLocaleString('uz-UZ'),
+          timestamp: nowFull,
           actorId: activeSimUser.telegramId,
           actorRole: 'temp_admin',
           action: 'ACTIVATE_TEMP_ADMIN_30M',
@@ -941,7 +987,25 @@ export default function App() {
         ...prev,
       ]);
       appendBotMessage({
-        text: `🛡 Tabriklaymiz! Sizga 30 daqiqalik vaqtinchalik admin huquqi berildi!\n\n⏳ Amal qilish muddati: ${expDate} gacha.\n📋 Barcha harakatlaringiz AuditLog jurnaliga yozib boriladi.\n⚠️ Sizda Asosiy Adminning maxfiy huquqlari (Foydalanuvchilar shaxsiy ma’lumotlari, Kanallarni o‘chirish, Reklama) yo‘q, ammo Statistika va Xabarlar bo‘limidan foydalana olasiz!`,
+        text: `🛡 Tabriklaymiz! Sizga 30 daqiqalik vaqtinchalik admin huquqi berildi!\n\n⏳ Amal qilish muddati: ${expDate} gacha.\n📋 Barcha harakatlaringiz AuditLog jurnaliga yozib boriladi.\n⚠️ Muddat tugagach, qo‘shimcha huquqlar avtomatik bekor qilinadi.`,
+      });
+      appendBotMessage({
+        text:
+          `🚨 [Asosiy Adminga Xabar -> ADMIN_ID=900100200]\n` +
+          `Diqqat! Vaqtinchalik Admin tizimga kirdi!\n` +
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `📌 Holat: Yangi 30 daqiqalik vaqtinchalik admin faollashtirildi\n` +
+          `🆔 Telegram ID: ${activeSimUser.telegramId}\n` +
+          `🙍‍♂️ Ism-familiya: ${activeSimUser.firstName} ${activeSimUser.lastName}\n` +
+          `🔗 Username: @${activeSimUser.username}\n` +
+          `📞 Telefon: ${activeSimUser.phoneNumber || 'Tasdiqlanmagan'}\n` +
+          `⏳ Amal qilish muddati: ${expDate} gacha\n` +
+          `🕒 Kirgan vaqti: ${nowFull}\n\n` +
+          `Ushbu foydalanuvchining vaqtinchalik admin huquqini qoldirasizmi yoki bekor qilasizmi?`,
+        inlineButtons: [
+          { label: '✅ Qoldirish', action: 'temp_alert_keep' },
+          { label: '🚫 Bekor qilish', action: 'temp_alert_revoke' },
+        ],
       });
       return;
     }
@@ -1201,9 +1265,34 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => {
+                      const expDate = new Date(Date.now() + 30 * 60 * 1000).toLocaleTimeString('uz-UZ', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      });
+                      const nowFull = new Date().toLocaleString('uz-UZ');
                       setSimRole('temp_admin');
+                      setUsers((prev) =>
+                        prev.map((u, idx) =>
+                          idx === 0 ? { ...u, isTempAdmin: true, tempAdminExpiresAt: expDate } : u
+                        )
+                      );
                       appendBotMessage({
-                        text: '⏱ Rejim o‘zgartirildi: 30 daqiqalik Vaqtinchalik Admin (Cheklangan huquqlar + AuditLog).',
+                        text:
+                          `🚨 [Asosiy Adminga Xabar -> ADMIN_ID=900100200]\n` +
+                          `Diqqat! Vaqtinchalik Admin tizimga kirdi!\n` +
+                          `━━━━━━━━━━━━━━━━━━━━\n` +
+                          `📌 Holat: Vaqtinchalik admin paneliga kirdi\n` +
+                          `🆔 Telegram ID: ${activeSimUser.telegramId}\n` +
+                          `🙍‍♂️ Ism-familiya: ${activeSimUser.firstName} ${activeSimUser.lastName}\n` +
+                          `🔗 Username: @${activeSimUser.username}\n` +
+                          `📞 Telefon: ${activeSimUser.phoneNumber || 'Tasdiqlanmagan'}\n` +
+                          `⏳ Amal qilish muddati: ${expDate} gacha\n` +
+                          `🕒 Kirgan vaqti: ${nowFull}\n\n` +
+                          `Ushbu foydalanuvchining vaqtinchalik admin huquqini qoldirasizmi yoki bekor qilasizmi?`,
+                        inlineButtons: [
+                          { label: '✅ Qoldirish', action: 'temp_alert_keep' },
+                          { label: '🚫 Bekor qilish', action: 'temp_alert_revoke' },
+                        ],
                       });
                     }}
                     className={`py-2 px-2.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${

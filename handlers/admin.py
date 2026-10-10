@@ -12,6 +12,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy import func, select, update
@@ -25,9 +26,11 @@ from keyboards.admin_kb import (
     BTN_USERS,
     build_main_admin_kb,
     build_security_settings_kb,
+    build_temp_admin_alert_kb,
     build_temp_admin_kb,
     build_users_pagination_kb,
 )
+from keyboards.user_kb import remove_kb
 from models import (
     AuditLog,
     BotSetting,
@@ -59,7 +62,6 @@ async def _format_user_card(
 ) -> str:
     """
     8.2. FOYDALANUVCHILAR bo'limi uchun bitta foydalanuvchining barcha ma'lumotlarini formatlaydi.
-    Yosh faqat foydalanuvchi alohida taqdim qilgan bo'lsagina ko'rsatiladi.
     """
     now = datetime.now(timezone.utc)
     active_temp = await session.scalar(
@@ -77,7 +79,6 @@ async def _format_user_card(
     else:
         temp_status = "❌ Yo‘q"
 
-    age_display = f"{user.age} yosh" if user.age is not None else "Taqdim etilmagan"
     username_display = f"@{html.escape(user.username)}" if user.username else "Mavjud emas"
     last_name_display = html.escape(user.last_name) if user.last_name else "—"
     phone_display = html.escape(user.phone_number) if user.phone_number else "Tasdiqlanmagan"
@@ -90,7 +91,6 @@ async def _format_user_card(
         f"🙍‍♂️ <b>Familiya:</b> {last_name_display}\n"
         f"🔗 <b>Username:</b> {username_display}\n"
         f"📞 <b>Telefon raqami:</b> <code>{phone_display}</code>\n"
-        f"🎂 <b>Yosh:</b> {age_display}\n"
         f"📅 <b>Birinchi kirgan vaqti:</b> {_format_dt(user.joined_at, config)}\n"
         f"🕒 <b>Oxirgi faolligi:</b> {_format_dt(user.last_active_at, config)}\n"
         f"📡 <b>Kanal obunasi holati:</b> {'✅ Obuna bo‘lgan' if user.is_subscribed_all else '❌ Obuna bo‘lmagan'}\n"
@@ -112,7 +112,10 @@ async def show_statistics_handler(
     Bazadagi haqiqiy ma'lumotlar asosida barcha ko'rsatkichlarni hisoblaydi.
     """
     if not is_main_admin and temp_admin is None:
-        await message.answer("⛔️ Sizda ushbu bo‘limni ko‘rish huquqi yo‘q.")
+        await message.answer(
+            "⛔️ Sizda ushbu bo‘limni ko‘rish huquqi yo‘q.",
+            reply_markup=remove_kb(),
+        )
         return
 
     now_utc = datetime.now(timezone.utc)
@@ -530,3 +533,123 @@ async def save_new_delete_delay(
         f"✅ Vaqtinchalik xabarlarni avtomatik o‘chirish muddati <b>{new_sec} soniya</b> etib belgilandi.",
         reply_markup=build_main_admin_kb(),
     )
+
+
+@router.callback_query(F.data.startswith("adm_temp_alert:"))
+async def cb_temp_admin_alert_actions(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    config: Config,
+    is_main_admin: bool,
+) -> None:
+    """
+    Vaqtinchalik admin tizimga kirganda Asosiy Adminga kelgan xabardagi
+    «✅ Qoldirish» va «🚫 Bekor qilish» tugmalari handleri.
+    """
+    if not is_main_admin:
+        await callback.answer("⛔️ Faqat Asosiy Admin uchun!", show_alert=True)
+        return
+
+    parts = (callback.data or "").split(":")
+    if len(parts) < 4:
+        await callback.answer("Noto‘g‘ri so‘rov", show_alert=True)
+        return
+
+    action = parts[1]
+    temp_admin_id = int(parts[2]) if parts[2].isdigit() else 0
+    target_tg_id = int(parts[3]) if parts[3].isdigit() else 0
+    now = datetime.now(timezone.utc)
+    now_local_str = now.astimezone(config.tz).strftime("%d.%m.%Y %H:%M:%S")
+
+    if action == "keep":
+        active_record = await session.scalar(
+            select(TemporaryAdmin).where(
+                TemporaryAdmin.telegram_id == target_tg_id,
+                TemporaryAdmin.is_active.is_(True),
+                TemporaryAdmin.expires_at > now,
+            )
+        )
+        if active_record is None:
+            await callback.answer(
+                "⌛️ Ushbu foydalanuvchining vaqtinchalik admin muddati allaqachon tugagan yoki bekor qilingan.",
+                show_alert=True,
+            )
+            if callback.message:
+                try:
+                    await callback.message.edit_reply_markup(reply_markup=None)
+                except TelegramAPIError:
+                    pass
+            return
+
+        await log_admin_action(
+            session=session,
+            actor_telegram_id=config.admin_id,
+            actor_role="main_admin",
+            action="KEEP_TEMP_ADMIN",
+            target_type="user",
+            target_id=str(target_tg_id),
+            details=f"Vaqtinchalik admin ({target_tg_id}) huquqi asosiy admin tomonidan qoldirildi",
+        )
+        await callback.answer("✅ Vaqtinchalik admin huquqi o‘z kuchida qoldirildi!")
+        if callback.message:
+            base_html = callback.message.html_text or ""
+            updated_text = (
+                f"{base_html}\n\n"
+                f"✅ <b>Qaror:</b> Asosiy admin tomonidan <b>QOLDIRILDI</b> (<code>{now_local_str}</code>)."
+            )
+            try:
+                await callback.message.edit_text(
+                    updated_text,
+                    reply_markup=build_temp_admin_alert_kb(
+                        temp_admin_id=active_record.id,
+                        target_telegram_id=target_tg_id,
+                        kept=True,
+                    ),
+                )
+            except TelegramAPIError:
+                pass
+        return
+
+    if action == "revoke":
+        await session.execute(
+            update(TemporaryAdmin)
+            .where(
+                TemporaryAdmin.telegram_id == target_tg_id,
+                TemporaryAdmin.is_active.is_(True),
+            )
+            .values(is_active=False, revoked_at=now)
+        )
+        await log_admin_action(
+            session=session,
+            actor_telegram_id=config.admin_id,
+            actor_role="main_admin",
+            action="REVOKE_TEMP_ADMIN",
+            target_type="user",
+            target_id=str(target_tg_id),
+            details=f"Vaqtinchalik admin ({target_tg_id}) huquqi asosiy admin tomonidan darhol bekor qilindi",
+        )
+        await callback.answer("🚫 Vaqtinchalik admin huquqi bekor qilindi!", show_alert=True)
+
+        if callback.message:
+            base_html = callback.message.html_text or ""
+            updated_text = (
+                f"{base_html}\n\n"
+                f"🚫 <b>Qaror:</b> Asosiy admin tomonidan <b>BEKOR QILINDI</b> (<code>{now_local_str}</code>)."
+            )
+            try:
+                await callback.message.edit_text(updated_text, reply_markup=None)
+            except TelegramAPIError:
+                pass
+
+        try:
+            await callback.bot.send_message(
+                chat_id=target_tg_id,
+                text=(
+                    "🚫 <b>Sizning vaqtinchalik admin huquqingiz Asosiy Administrator tomonidan bekor qilindi!</b>\n\n"
+                    "👤 Siz oddiy foydalanuvchi rejimiga o‘tkazildingiz. Maxsus kodlarni yozib yuborishingiz mumkin:"
+                ),
+                reply_markup=remove_kb(),
+            )
+        except TelegramAPIError as exc:
+            logger.debug("Bekor qilingan vaqtinchalik adminga xabar yuborib bo'lmadi: %s", exc)
+

@@ -34,7 +34,11 @@ from sqlalchemy.orm import selectinload
 
 from config import Config
 from database import DatabaseManager
-from keyboards.admin_kb import build_main_admin_kb, build_temp_admin_kb
+from keyboards.admin_kb import (
+    build_main_admin_kb,
+    build_temp_admin_alert_kb,
+    build_temp_admin_kb,
+)
 from keyboards.user_kb import (
     build_phone_request_kb,
     build_subscription_inline_kb,
@@ -55,6 +59,98 @@ from services.subscription import check_user_subscriptions
 
 logger = logging.getLogger(__name__)
 router = Router(name="user_router")
+
+
+async def _notify_main_admin_on_start(
+    bot: Bot,
+    config: Config,
+    db_user: User,
+    is_sub_ok: bool,
+    temp_admin: TemporaryAdmin | None,
+) -> None:
+    """
+    Foydalanuvchi botga har doim /start bosganda Asosiy Adminga (ADMIN_ID) xabar yuboradi.
+    """
+    if db_user.telegram_id == config.admin_id:
+        return
+
+    now_local = datetime.now(config.tz).strftime("%d.%m.%Y %H:%M:%S")
+    full_name = html.escape(
+        f"{db_user.first_name or ''} {db_user.last_name or ''}".strip() or "Foydalanuvchi"
+    )
+    username_display = f"@{html.escape(db_user.username)}" if db_user.username else "Mavjud emas"
+    phone_display = html.escape(db_user.phone_number) if db_user.phone_number else "Tasdiqlanmagan"
+    sub_display = "✅ Obuna bo‘lgan" if is_sub_ok else "❌ Obuna bo‘lmagan"
+    role_display = "⏱ Vaqtinchalik Admin" if temp_admin is not None else "👤 Oddiy foydalanuvchi"
+
+    text = (
+        f"🔔 <b>Foydalanuvchi botga /start bosdi!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🆔 <b>Telegram ID:</b> <code>{db_user.telegram_id}</code>\n"
+        f"🙍‍♂️ <b>Ism-familiya:</b> {full_name}\n"
+        f"🔗 <b>Username:</b> {username_display}\n"
+        f"📞 <b>Telefon:</b> <code>{phone_display}</code>\n"
+        f"📡 <b>Kanal obunasi:</b> {sub_display}\n"
+        f"🛡 <b>Maqomi:</b> {role_display}\n"
+        f"🕒 <b>Vaqt:</b> <code>{now_local}</code>"
+    )
+
+    reply_markup = (
+        build_temp_admin_alert_kb(temp_admin.id, db_user.telegram_id)
+        if temp_admin is not None
+        else None
+    )
+
+    try:
+        await bot.send_message(
+            chat_id=config.admin_id,
+            text=text,
+            reply_markup=reply_markup,
+        )
+    except TelegramAPIError as exc:
+        logger.debug("Asosiy adminga /start xabarini yuborib bo'lmadi: %s", exc)
+
+
+async def _notify_main_admin_on_temp_admin_login(
+    bot: Bot,
+    config: Config,
+    db_user: User,
+    temp_admin: TemporaryAdmin,
+    action_title: str = "Yangi 30 daqiqalik vaqtinchalik admin faollashtirildi",
+) -> None:
+    """
+    Vaqtinchalik admin tizimga kirganda Asosiy Adminga «✅ Qoldirish» va «🚫 Bekor qilish»
+    tugmalari bilan darhol xabar yuboradi.
+    """
+    now_local = datetime.now(config.tz).strftime("%d.%m.%Y %H:%M:%S")
+    exp_local = temp_admin.expires_at.astimezone(config.tz).strftime("%d.%m.%Y %H:%M:%S")
+    full_name = html.escape(
+        f"{db_user.first_name or ''} {db_user.last_name or ''}".strip() or "Foydalanuvchi"
+    )
+    username_display = f"@{html.escape(db_user.username)}" if db_user.username else "Mavjud emas"
+    phone_display = html.escape(db_user.phone_number) if db_user.phone_number else "Tasdiqlanmagan"
+
+    text = (
+        f"🚨 <b>Diqqat! Vaqtinchalik Admin tizimga kirdi!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📌 <b>Holat:</b> {html.escape(action_title)}\n"
+        f"🆔 <b>Telegram ID:</b> <code>{db_user.telegram_id}</code>\n"
+        f"🙍‍♂️ <b>Ism-familiya:</b> {full_name}\n"
+        f"🔗 <b>Username:</b> {username_display}\n"
+        f"📞 <b>Telefon:</b> <code>{phone_display}</code>\n"
+        f"⏳ <b>Amal qilish muddati:</b> <b>{exp_local}</b> gacha\n"
+        f"🕒 <b>Kirgan vaqti:</b> <code>{now_local}</code>\n\n"
+        f"<i>Ushbu foydalanuvchining vaqtinchalik admin huquqini qoldirasizmi yoki bekor qilasizmi?</i>"
+    )
+
+    try:
+        await bot.send_message(
+            chat_id=config.admin_id,
+            text=text,
+            reply_markup=build_temp_admin_alert_kb(temp_admin.id, db_user.telegram_id),
+        )
+    except TelegramAPIError as exc:
+        logger.debug("Asosiy adminga vaqtinchalik admin xabarini yuborib bo'lmadi: %s", exc)
 
 
 async def _send_content_to_user(
@@ -135,7 +231,7 @@ async def cmd_start(
     """
     3-bo'lim: /start buyrug'i.
     - Asosiy admin uchun obuna va telefon tasdig'isiz darhol admin klaviaturasi ochiladi.
-    - Oddiy foydalanuvchini ismi bilan iliq kutib oladi, obuna va telefon tasdig'ini tekshiradi.
+    - Oddiy foydalanuvchi har doim /start bosganda Asosiy Adminga bildirishnoma yuboriladi.
     - Obuna va telefon tasdiqlangan bo'lsa, pastda hech qanday tugma chiqarmasdan (ReplyKeyboardRemove)
       to'g'ridan-to'g'ri maxsus kodlarni qabul qilishni boshlaydi.
     """
@@ -151,6 +247,19 @@ async def cmd_start(
         )
         return
 
+    is_sub_ok, unsubscribed = await check_user_subscriptions(
+        message.bot, session, db_user.telegram_id
+    )
+
+    # Foydalanuvchi har doim /start bosganda Asosiy Adminga xabar yuborish
+    await _notify_main_admin_on_start(
+        bot=message.bot,
+        config=config,
+        db_user=db_user,
+        is_sub_ok=is_sub_ok,
+        temp_admin=temp_admin,
+    )
+
     welcome_msg = await message.answer(
         f"✨ <b>Assalomu alaykum, {safe_name}!</b>\n\n"
         f"<b>WORKING CODE</b> rasmiy botiga xush kelibsiz!\n"
@@ -160,10 +269,6 @@ async def cmd_start(
     )
     await schedule_bot_message_deletion(
         session, welcome_msg, category="welcome", config=config
-    )
-
-    is_sub_ok, unsubscribed = await check_user_subscriptions(
-        message.bot, session, db_user.telegram_id
     )
 
     if not is_sub_ok:
@@ -429,6 +534,7 @@ async def handle_contact_verification(
 @router.message(F.text == "⏱ Vaqtinchalik Admin Paneli")
 async def open_temp_admin_panel(
     message: Message,
+    db_user: User,
     temp_admin: TemporaryAdmin | None,
     config: Config,
 ) -> None:
@@ -445,6 +551,13 @@ async def open_temp_admin_panel(
         f"Amal qilish muddati: <b>{exp_local}</b> gacha.\n\n"
         f"Siz umumiy statistikani ko‘rishingiz va yangi xabarlar/kodlar qo‘shishingiz mumkin.",
         reply_markup=build_temp_admin_kb(),
+    )
+    await _notify_main_admin_on_temp_admin_login(
+        bot=message.bot,
+        config=config,
+        db_user=db_user,
+        temp_admin=temp_admin,
+        action_title="Vaqtinchalik admin paneliga kirdi",
     )
 
 
@@ -472,7 +585,8 @@ async def handle_special_code_lookup(
     - Foydalanuvchi yuborgan matnni maxsus kod sifatida qidiradi.
     - Brute-force urinishlarini cheklaydi.
     - Agar kod 30 daqiqalik vaqtinchalik admin kodi bo'lsa, foydalanuvchiga 30 daqiqalik
-      vaqtinchalik admin huquqini beradi va audit logga yozadi.
+      vaqtinchalik admin huquqini beradi, audit logga yozadi va Asosiy Adminga
+      «✅ Qoldirish» hamda «🚫 Bekor qilish» tugmalari bilan xabar yuboradi.
     - Agar oddiy kontent kodi bo'lsa, unga tegishli kontentni protect_content=True bilan yuboradi
       hamda ContentAccessLog statistikasiga yozadi.
     """
@@ -503,6 +617,13 @@ async def handle_special_code_lookup(
                 f"O‘zingizga qayta huquq berish yoki muddatni uzaytirish mumkin emas.",
                 reply_markup=build_temp_admin_kb(),
             )
+            await _notify_main_admin_on_temp_admin_login(
+                bot=message.bot,
+                config=config,
+                db_user=db_user,
+                temp_admin=temp_admin,
+                action_title="Vaqtinchalik admin maxfiy kodni qayta kiritdi",
+            )
             return
 
         await check_and_record_code_attempt(session, db_user, success=True, config=config)
@@ -523,6 +644,13 @@ async def handle_special_code_lookup(
             f"📋 Sizning barcha harakatlaringiz xavfsizlik jurnaliga (Audit Log) yozib boriladi.\n"
             f"⚠️ Muddat tugagach, qo‘shimcha huquqlar avtomatik bekor qilinadi.",
             reply_markup=build_temp_admin_kb(),
+        )
+        await _notify_main_admin_on_temp_admin_login(
+            bot=message.bot,
+            config=config,
+            db_user=db_user,
+            temp_admin=granted,
+            action_title="Yangi 30 daqiqalik vaqtinchalik admin faollashtirildi",
         )
         return
 

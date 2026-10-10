@@ -32,6 +32,7 @@ from keyboards.admin_kb import (
     build_messages_menu_kb,
     build_temp_admin_kb,
 )
+from keyboards.user_kb import remove_kb
 from models import Content, ContentItem, TemporaryAdmin
 from services.audit import log_admin_action
 from services.security import (
@@ -143,7 +144,10 @@ async def show_messages_menu(
     temp_admin: TemporaryAdmin | None,
 ) -> None:
     if not is_main_admin and temp_admin is None:
-        await message.answer("⛔️ Sizda ushbu bo‘limga kirish huquqi yo‘q.")
+        await message.answer(
+            "⛔️ Sizda ushbu bo‘limga kirish huquqi yo‘q.",
+            reply_markup=remove_kb(),
+        )
         return
 
     await state.clear()

@@ -72,7 +72,6 @@ class User(Base):
     phone_number: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     is_phone_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     is_subscribed_all: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
-    age: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     is_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
 
     failed_code_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

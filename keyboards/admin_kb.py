@@ -311,3 +311,39 @@ def build_security_settings_kb() -> InlineKeyboardMarkup:
             ],
         ]
     )
+
+
+def build_temp_admin_alert_kb(
+    temp_admin_id: int, target_telegram_id: int, kept: bool = False
+) -> InlineKeyboardMarkup:
+    """
+    Vaqtinchalik admin tizimga kirganda Asosiy Adminga boradigan xabar ostidagi
+    «✅ Qoldirish» va «🚫 Bekor qilish» tugmalari.
+    """
+    if kept:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🚫 Bekor qilish",
+                        callback_data=f"adm_temp_alert:revoke:{temp_admin_id}:{target_telegram_id}",
+                    )
+                ]
+            ]
+        )
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Qoldirish",
+                    callback_data=f"adm_temp_alert:keep:{temp_admin_id}:{target_telegram_id}",
+                ),
+                InlineKeyboardButton(
+                    text="🚫 Bekor qilish",
+                    callback_data=f"adm_temp_alert:revoke:{temp_admin_id}:{target_telegram_id}",
+                ),
+            ]
+        ]
+    )
+
